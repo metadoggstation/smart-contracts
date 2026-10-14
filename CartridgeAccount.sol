@@ -1,47 +1,57 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
+import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
 /**
- * @title ChamberCartridge
- * @dev 弾倉NFT（ERC-721）。ERC-6551 Registryと連携し、各トークンがスマートアカウント（車）を保有する起点となる。
+ * @title CartridgeAccount (ERC-6551 準拠スマートアカウント)
+ * @dev 弾倉NFTに紐づく「車」。\$MEATやPAアイテムを保有し、所有者の指示で自律的に動く。
  */
-contract ChamberCartridge is ERC721URIStorage, Ownable {
-    uint256 private _nextTokenId;
-    
-    // 戦術メタデータのオンチェーン記録
-    mapping(uint256 => uint256) public beefRatio;
-    mapping(uint256 => uint256) public chickenRatio;
-    mapping(uint256 => uint256) public lifetimeWinRate;
+contract CartridgeAccount is ERC1155Holder {
+    // 自身を保有しているNFTコントラクトのアドレス
+    address public immutable tokenContract;
+    // 自身を保有しているNFTのID
+    uint256 public immutable tokenId;
+    // ブロックチェーンのチェーンID
+    uint256 public immutable chainId;
 
-    // TBA (ERC-6551) Registryコントラクトのアドレス
-    address public erc6551Registry;
+    // 実行エラー定義
+    error NotAuthorized();
 
-    constructor(address _registry) ERC721("Metadogg Cartridge", "CHAMBER") Ownable(msg.sender) {
-        erc6551Registry = _registry;
+    constructor(address _tokenContract, uint256 _tokenId, uint256 _chainId) {
+        tokenContract = _tokenContract;
+        tokenId = _tokenId;
+        chainId = _chainId;
     }
 
     /**
-     * @notice 未認証ユーザーがオンボーディングを果たした際に弾倉NFTをMintする
+     * @notice 車の所有者（親NFTを持っているEOA）を返す
      */
-    function mintCartridge(address to, string memory uri, uint256 _beefRatio, uint256 _chickenRatio) external {
-        uint256 tokenId = _nextTokenId++;
-        _safeMint(to, tokenId);
-        _setTokenURI(tokenId, uri);
-        
-        beefRatio[tokenId] = _beefRatio;
-        chickenRatio[tokenId] = _chickenRatio;
-        
-        // TODO: Mint成功後、フロントエンドからERC-6551 Registryを呼び出し、
-        // このtokenIdに紐づくTBA（Token Bound Account）をデプロイするフローを構築。
+    function owner() public view returns (address) {
+        return IERC721(tokenContract).ownerOf(tokenId);
     }
 
     /**
-     * @notice バックテストの結果に応じて勝率を更新（動的NFTとしての成長）
+     * @notice 車を運転する（任意のコントラクトを呼び出す）
+     * 例：ButcherPoolの `stakeMeat` をこのTBAから呼び出す場合に使用。
      */
-    function updateWinRate(uint256 tokenId, uint256 newWinRate) external onlyOwner {
-        lifetimeWinRate[tokenId] = newWinRate;
+    function executeCall(
+        address to,
+        uint256 value,
+        bytes calldata data
+    ) external payable returns (bytes memory result) {
+        // 親NFTの所有者だけがこの車を運転（トランザクション実行）できる
+        if (msg.sender != owner()) revert NotAuthorized();
+
+        bool success;
+        (success, result) = to.call{value: value}(data);
+        require(success, "Call failed");
+
+        return result;
     }
+
+    // ETHを受け取るためのフォールバック
+    receive() external payable {}
 }
