@@ -17,6 +17,7 @@ contract MeatToken is ERC20, Ownable, EIP712 {
 
     // 署名者（Pythonバックエンド / Oracle）のアドレス
     address public trustedSigner;
+    address public paController;
 
     // リプレイ攻撃防止のためのnonce管理（各TBAアドレスごとに管理）
     mapping(address => uint256) public nonces;
@@ -33,6 +34,24 @@ contract MeatToken is ERC20, Ownable, EIP712 {
         EIP712("MetadoggStation", "1") 
     {
         trustedSigner = _trustedSigner;
+    }
+
+    modifier onlyPaController() {
+        require(msg.sender == paController, "Not authorized");
+        _;
+    }
+
+    function setPaController(address _paController) external onlyOwner {
+        paController = _paController;
+    }
+
+    function mintFor(address to, uint256 amount) external onlyPaController {
+        _mint(to, amount);
+    }
+
+    function burnFrom(address from, uint256 amount) external onlyPaController {
+        _spendAllowance(from, msg.sender, amount);
+        _burn(from, amount);
     }
 
     /**

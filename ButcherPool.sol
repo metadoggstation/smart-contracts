@@ -20,6 +20,8 @@ contract ButcherPool is Ownable {
 
     // TBAアドレスごとのステーキング状況
     mapping(address => Stake) public stakes;
+    mapping(address => uint256) public accumulatedFuel;
+    address public paController;
 
     // 1 $MEATあたり、1秒間に生成される流動性ポイント（計算用レート）
     uint256 public constant REWARD_RATE_PER_SECOND = 100;
@@ -27,9 +29,19 @@ contract ButcherPool is Ownable {
     event MeatStaked(address indexed tba, uint256 amount);
     event MeatUnstaked(address indexed tba, uint256 amount);
     event FuelClaimed(address indexed tba, uint256 fuelAmount);
+    event FuelConsumed(address indexed tba, uint256 fuelAmount);
 
     constructor(address _meatToken) Ownable(msg.sender) {
         meatToken = IERC20(_meatToken);
+    }
+
+    modifier onlyPaController() {
+        require(msg.sender == paController, "Not authorized");
+        _;
+    }
+
+    function setPaController(address _paController) external onlyOwner {
+        paController = _paController;
     }
 
     /**
@@ -70,10 +82,18 @@ contract ButcherPool is Ownable {
      */
     function calculatePendingFuel(address tba) public view returns (uint256) {
         Stake memory userStake = stakes[tba];
-        if (userStake.amount == 0) return 0;
+        uint256 pendingFuel = accumulatedFuel[tba];
+        if (userStake.amount == 0) return pendingFuel;
 
         uint256 timeElapsed = block.timestamp - userStake.lastClaimTime;
-        return timeElapsed * userStake.amount * REWARD_RATE_PER_SECOND;
+        return pendingFuel + timeElapsed * userStake.amount * REWARD_RATE_PER_SECOND;
+    }
+
+    function consumeFuel(address tba, uint256 amount) external onlyPaController {
+        require(calculatePendingFuel(tba) >= amount, "Insufficient fuel");
+        _claimFuel(tba);
+        accumulatedFuel[tba] -= amount;
+        emit FuelConsumed(tba, amount);
     }
 
     /**
@@ -83,6 +103,7 @@ contract ButcherPool is Ownable {
         uint256 pendingFuel = calculatePendingFuel(tba);
         if (pendingFuel > 0) {
             stakes[tba].lastClaimTime = block.timestamp;
+            accumulatedFuel[tba] += pendingFuel;
             // ※ここでPAの進行コントラクトへ燃料データを送信、または内部マッピングに記録します
             emit FuelClaimed(tba, pendingFuel);
         }

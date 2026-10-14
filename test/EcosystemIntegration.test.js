@@ -7,12 +7,26 @@ describe("METADOGG STATION Ecosystem Integration", function () {
     const [player, trustedSigner] = await ethers.getSigners();
 
     const chamber = await (await ethers.getContractFactory("ChamberCartridge")).deploy();
+    const licenseSBT = await (
+      await ethers.getContractFactory("MetadoggLicenseSBT")
+    ).deploy();
     const meatToken = await (
       await ethers.getContractFactory("MeatToken")
     ).deploy(trustedSigner.address);
     const butcherPool = await (
       await ethers.getContractFactory("ButcherPool")
     ).deploy(await meatToken.getAddress());
+    const pa = await (
+      await ethers.getContractFactory("MetadoggStationPA")
+    ).deploy(
+      trustedSigner.address,
+      await butcherPool.getAddress(),
+      await meatToken.getAddress(),
+      await licenseSBT.getAddress()
+    );
+    await meatToken.setPaController(await pa.getAddress());
+    await butcherPool.setPaController(await pa.getAddress());
+    await licenseSBT.setPaController(await pa.getAddress());
 
     const tokenId = 0n;
     await chamber.mintCartridge(player.address, "ipfs://cartridge", 80, 20);
@@ -78,5 +92,49 @@ describe("METADOGG STATION Ecosystem Integration", function () {
     expect(await butcherPool.calculatePendingFuel(tbaAddress)).to.equal(
       expectedFuel
     );
+
+    const fuelConsumed = expectedFuel / 2n;
+    const meatReward = ethers.parseEther("2");
+    const paDomain = {
+      name: "MetadoggStationPA",
+      version: "1",
+      chainId: network.chainId,
+      verifyingContract: await pa.getAddress(),
+    };
+    const paTypes = {
+      GameTurnResult: [
+        { name: "tbaAddress", type: "address" },
+        { name: "fuelConsumed", type: "uint256" },
+        { name: "meatReward", type: "uint256" },
+        { name: "issueLicense", type: "bool" },
+        { name: "nonce", type: "uint256" },
+      ],
+    };
+    const turnResult = {
+      tbaAddress,
+      fuelConsumed,
+      meatReward,
+      issueLicense: true,
+      nonce: 0n,
+    };
+    const turnSignature = await trustedSigner.signTypedData(
+      paDomain,
+      paTypes,
+      turnResult
+    );
+    await pa.settleTurn(
+      tbaAddress,
+      fuelConsumed,
+      meatReward,
+      true,
+      0,
+      turnSignature
+    );
+
+    expect(await butcherPool.calculatePendingFuel(tbaAddress)).to.be.lessThan(
+      expectedFuel
+    );
+    expect(await meatToken.balanceOf(tbaAddress)).to.equal(meatReward);
+    expect(await licenseSBT.ownerOf(0)).to.equal(tbaAddress);
   });
 });
