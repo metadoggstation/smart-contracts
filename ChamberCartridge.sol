@@ -12,6 +12,8 @@ import "./IERC4907.sol"; // EIP-4907インターフェース
 contract ChamberCartridge is ERC721URIStorage, Ownable, IERC4907 {
     uint256 private _nextTokenId;
 
+    event CartridgeMinted(address indexed to, uint256 indexed tokenId);
+
     // トークンIDごとの利用者と有効期限の記録
     struct UserInfo {
         address user;
@@ -24,6 +26,22 @@ contract ChamberCartridge is ERC721URIStorage, Ownable, IERC4907 {
     mapping(uint256 => uint256) public chickenRatio;
 
     constructor() ERC721("Metadogg Cartridge", "CHAMBER") Ownable(msg.sender) {}
+
+    function mintCartridge(
+        address to,
+        string memory uri,
+        uint256 _beefRatio,
+        uint256 _chickenRatio
+    ) external {
+        uint256 tokenId = _nextTokenId++;
+        _safeMint(to, tokenId);
+        _setTokenURI(tokenId, uri);
+
+        beefRatio[tokenId] = _beefRatio;
+        chickenRatio[tokenId] = _chickenRatio;
+
+        emit CartridgeMinted(to, tokenId);
+    }
 
     /**
      * @notice ドライバーを車に乗せる（期限付きでUser権限を付与）
